@@ -1,11 +1,11 @@
 #include <netinet/in.h>
 #include <signal.h>
+#include <stddef.h>
 #include <sys/socket.h>
 #include <pthread.h>
 #include <unistd.h>
 #include <stdlib.h>
 #include <stdio.h>
-#include <fcntl.h>
 #include <string.h>
 
 #include "utils/http.h"
@@ -38,8 +38,6 @@ void initialize()
 void* handle_request(void* client_fd_ptr)
 {
     int client_fd = *((int*)client_fd_ptr);
-    char* rsp_header = NULL;
-    char* rsp_body = NULL;
     char* buffer = NULL;
     size_t buffer_size = 4096;
 
@@ -52,49 +50,20 @@ void* handle_request(void* client_fd_ptr)
     }
     buffer[cnt] = 0;
 
-    struct Request request = parse_request(buffer, cnt);
+    struct Request request = request_new(buffer, cnt);
     free(buffer);
 
-    int fd = open(request.path, 0, O_RDONLY);
-    if (fd < 0)
-    {
-        perror("Could not open a file");
-        rsp_header = response_header(404);
-    }
-    else
-    {
-        rsp_body = malloc(buffer_size * sizeof(char));
-        cnt = read(fd, rsp_body, buffer_size);
-        if (cnt <= 0)
-        {
-            perror("Could not read file");
-            rsp_header = response_header(500);
-        }
-        else
-        {
-            rsp_body[cnt] = 0;
-            rsp_header = response_header(200);
-        }
-        close(fd);
-    }
+    struct Response response = response_new();
+    response_body_from_file(&response, request.path);
 
-    char response[buffer_size];
-    memset(response, 0, buffer_size);
+    char* raw_response = response_to_str(&response);
+    size_t raw_response_len = strlen(raw_response);
 
-    strcpy(response, rsp_header);
-    size_t header_len = strlen(rsp_header);
-    response[header_len + 0] = '\r';
-    response[header_len + 1] = '\n';
-    header_len += 2;
-    if (rsp_body != NULL)
-    {
-        strcpy(response + header_len, rsp_body);
-    }
-    size_t response_len = strlen(response);
-    send(client_fd, response, response_len, 0);
+    send(client_fd, raw_response, raw_response_len, 0);
 
-    free(rsp_body);
-    free_request(&request);
+    request_cleanup(&request);
+    response_cleanup(&response);
+    free(raw_response);
     close(client_fd);
     return NULL;
 }
